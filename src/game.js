@@ -1,141 +1,200 @@
 const canvas = document.getElementById('stage')
 , stage = canvas.getContext('2d')
-, sw = 480
-, sh = 640
+, stageWidth = 640
+, stageHeight = 640
 , buttons = {
     Left: 0,
     Right: 0,
     Up: 0,
     Down: 0
 }
-, cellW = 16
-, cellH = 16
+, cellWidth = 15
+, cellHeight = 15
 
 let then = Date.now()
 
-canvas.width = sw
-canvas.height = sh
+canvas.width = stageWidth
+canvas.height = stageHeight
 
-stage.fillColor = 'black'
 stage.fillRect(0, 0, canvas.width, canvas.height)
 
-let currentTetra, currentField, currentTick = 0, enemies = []
-
-document.addEventListener('keydown', ev => {
-    if (ev.key === 'a') {
-        if (!buttons.Left) buttons.Left = 1
-    } else if (ev.key === 'd') {
-        if (!buttons.Right) buttons.Right = 1
-    } else if (ev.key === 's') {
-        if (!buttons.Down) buttons.Down = 1
-    } else if (ev.key === 'w') {
-        if (!buttons.Up) buttons.Up = 1
-    }
-})
-
-document.addEventListener('keyup', ev => {
-    if (ev.key === 'a') {
-        if (buttons.Left) buttons.Left = 0
-    } else if (ev.key === 'd') {
-        if (buttons.Right) buttons.Right = 0
-    } else if (ev.key === 's') {
-        if (buttons.Down) buttons.Down = 0
-    } else if (ev.key === 'w') {
-        if (buttons.Up) buttons.Up = 0
-    }
-})
+let currentField, currentTick = 0, enemies = [], organisms = []
 
 const btn = name => name in buttons && buttons[name]
 
 const clamp = (min, max, v) =>
       v <= min ? min : v >= max ? max : v
 
-const grid = (w, h, fill=0) => {
+const grid = (width, height, fill=0) => {
+  //this grid is used to create lines in the Field
     const arr = []
-    for (let j = 0; j < h; j++) {
-        arr.push(Array(w).fill(fill))
+    for (let j = 0; j < height; j++) {
+        arr.push(Array(width).fill(fill))
     }
     return arr
 }
 
-const Field = (w, h, offsetX=0, offsetY=0) => ({
+const Field = (width, height, offsetX=0, offsetY=0) => ({
     level: 0,
-    lines: grid(w, h),
-    w, h,
+    lines: grid(width, height),
+    width, height,
     offsetX,
     offsetY
 })
 
-const Tetra = (x, y, color='yellow') => ({
-    x, y, color
+const Periphery = (incoming_array) => ({
+  minX: _.minBy(incoming_array, 'startX').startX,
+  maxX: _.maxBy(incoming_array, 'maxX').maxX,
+
+  minY: _.minBy(incoming_array, 'startY').startY,
+  maxY: _.maxBy(incoming_array, 'maxY').maxY
 })
 
-const Enemy = (x, y, dx, dy, color='pink') => ({
+const Amoeba = (x, y, sizeFactor=1, color='yellow') => ({
+  startX: x,
+  startY: y,
+  sizeFactor: sizeFactor,
+
+  maxX: x*sizeFactor,
+  maxY: y*sizeFactor,
+  color
+})
+
+const amoebaBoundaryCheck = (incomingX, incomingY, incomingPeriphery) => {
+  //change this to the periphery of the organism as whole??
+    withinXboundary = (incomingX >= incomingPeriphery.minX && incomingX <= incomingPeriphery.maxX)
+    withinYboundary = (incomingY >= incomingPeriphery.minY && incomingY <= incomingPeriphery.maxY)
+
+      console.log("boundaries", withinXboundary, withinYboundary)
+  return withinXboundary && withinYboundary
+}
+
+const Anemone = (x, y, sizeFactor=2, color='fuchsia') => ({
+  startX: x,
+  startY: y,
+  sizeFactor: sizeFactor,
+
+  maxX: x*sizeFactor*2,
+  maxY: y*sizeFactor*2,
+  color
+})
+
+const Other = (x, y, dx, dy, color='pink') => ({
     x, y, dx, dy, color, remove: false
 })
 
+const colouringIn = (startX, startY, color, sizeFactor) => {
+  for (let j = 0; j < currentField.height; j++) {
+
+      for (let i = 0; i < currentField.width; i++) {
+        //when i and j reach starting coordinates
+        if (i === startX && j === startY) {
+          //this is what draws the object
+              stage.fillStyle = color
+              // cellX and cellY are the starting points
+              //where colour will be filled in
+              const cellX = (i * (cellWidth + 2)) + currentField.offsetX
+              , cellY = (j * (cellHeight + 2)) + currentField.offsetY
+
+              stage.fillRect(cellX + 0, cellY + 0,
+                             cellWidth + sizeFactor, cellHeight + sizeFactor)
+          }
+
+      }
+  }
+}
+
 const init = () => {
-    currentField = Field(18, 28, 30)
-    currentTetra = Tetra(3, 3)
-    enemies.push(Enemy(0, 0, 1, 1, 'hotpink'))
-    enemies.push(Enemy(10, 0, -1, 1, 'blue'))
+    currentField = Field(32, 32, 16, 16)
+
+    organisms.push(Amoeba(5, 5))
+    organisms.push(Amoeba(4, 4))
+    organisms.push(Amoeba(3, 3))
+    currentAmoeba = Amoeba(6, 6)
+    organisms.push(currentAmoeba)
+
+    currentAnemone = Anemone(7, 7, 50)
+    //organisms.push(currentAnemone)
+
+    enemies.push(Other(0, 0, 1, 1, 'aqua'))
+    enemies.push(Other(10, 0, -1, 1, 'blue'))
 }
 
 const update = dt => {
+
     let dx = 0, dy = 0
     if (btn('Left')) dx = -1
     if (btn('Right')) dx = 1
     if (btn('Up')) dy = -1
     if (btn('Down')) dy = 1
-    currentTetra.x = clamp(0, currentField.w - 1, currentTetra.x + dx)
-    currentTetra.y = clamp(0, currentField.h - 1, currentTetra.y + dy)
+
     if (currentTick >= 0.75) {
         for (const enemy of enemies) {
             enemy.x += enemy.dx
             enemy.y += enemy.dy
+
+            currentPeriphery = Periphery(organisms)
+
+            console.log("enemy coordinates X: " + enemy.x + ", Y:" + enemy.y + " periphery ", currentPeriphery)
+            console.log("Anemone maxX ", currentAnemone.maxX)
+            if(amoebaBoundaryCheck(enemy.x, enemy.y, currentPeriphery) && (currentPeriphery.maxX < currentAnemone.maxX)){
+              //Amoeba breach protocol!
+              //begin evasive action!
+              currentAmoeba.startX += currentAmoeba.sizeFactor
+              currentAmoeba.maxX = currentAmoeba.startX
+            }//end of boundaryCheck!
+
             if (enemy.x < 0 ||
-                enemy.x > currentField.w - 1 ||
+                enemy.x > currentField.width - 1 ||
                 enemy.y < 0 ||
-                enemy.y > currentField.h - 1)
+                enemy.y > currentField.height - 1)
                 enemy.remove = true
+
         }
         currentTick = 0
     }
-    console.log(enemies)
+
+
     enemies = enemies.filter(e => e.remove === false)
+
     currentTick += dt
 }
 
 const render = () => {
-    stage.fillStyle = 'black'
-    stage.fillRect(0, 0, sw, sh)
-    for (let j = 0; j < currentField.h; j++) {
-        for (let i = 0; i < currentField.w; i++) {
+
+    stage.fillStyle = 'blue' //sets colour for background
+    stage.fillRect(0, 0, stageWidth, stageHeight)
+
+    //creates grid on top of background
+    for (let j = 0; j < currentField.height; j++) {
+
+        for (let i = 0; i < currentField.width; i++) {
             stage.fillStyle = '#333'
-            stage.fillRect((i * (cellW + 2)) + currentField.offsetX,
-                           (j * (cellH + 2)) + currentField.offsetY,
-                           cellW, cellH)
+            stage.fillRect((i * (cellWidth + 2)) + currentField.offsetX,
+                           (j * (cellHeight + 2)) + currentField.offsetY,
+                           cellWidth, cellHeight)
         }
     }
-    for (let j = 0; j < currentField.h; j++) {
-        for (let i = 0; i < currentField.w; i++) {
-            if (i === currentTetra.x && j === currentTetra.y) {
-                stage.fillStyle = currentTetra.color
-                const cellX = (i * (cellW + 2)) + currentField.offsetX
-                , cellY = (j * (cellH + 2)) + currentField.offsetY
-                stage.fillRect(cellX + 2, cellY + 2,
-                               cellW - 4, cellH - 4)
-            }
-        }
+
+    colouringIn(currentAnemone.startX, currentAnemone.startY, currentAnemone.color, currentAnemone.sizeFactor)
+    colouringIn(currentAmoeba.startX, currentAmoeba.startY, currentAmoeba.color, currentAmoeba.sizeFactor)
+
+    for(const amoeba of organisms){
+      colouringIn(amoeba.startX, amoeba.startY, amoeba.color, amoeba.sizeFactor)
     }
+
+
     for (const enemy of enemies) {
-        const cellX = (enemy.x * (cellW + 2)) + currentField.offsetX
-        , cellY = (enemy.y * (cellH + 2)) + currentField.offsetY
-        stage.fillStyle = enemy.color
-        stage.fillRect(cellX + 2, cellY + 2,
-                       cellW - 4, cellH - 4)
-    }
-}
+      //this is what colors in the enemies
+      stage.fillStyle = enemy.color
+
+       const cellX = (enemy.x * (cellWidth + 2)) + currentField.offsetX
+       , cellY = (enemy.y * (cellHeight + 2)) + currentField.offsetY
+
+       stage.fillRect(cellX + 14, cellY + 14,
+                      cellWidth - 1, cellHeight - 1)
+   }
+}//end of render
 
 const loop = () => {
     const now = Date.now()
